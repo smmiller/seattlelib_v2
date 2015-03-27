@@ -53,7 +53,8 @@ if callfunc == "initialize":
       'exitall', 'gethostbyname', 'getlasterror', 'getmyip', 'getresources', 
       'getruntime', 'getthreadname', 'listenforconnection', 
       'listenformessage', 'listfiles', 'log', 'openconnection', 'openfile', 
-      'randombytes', 'removefile', 'sendmessage', 'sleep'])
+      'randombytes', 'removefile', 'sendmessage', 'sleep', 
+      "json_parse"]) # XXX json_parse added temporarily for #1369
 
 
   # This is the maximum number of bytes we will try to read in for a file.
