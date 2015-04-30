@@ -19,7 +19,7 @@ COPIED_API = ["gethostbyname", "getmyip", "sendmessage", "listenformessage",
              "openconnection", "listenforconnection", "openfile", "listfiles",
              "removefile", "exitall", "createlock", "getruntime", "randombytes",
              "createthread", "sleep", "log", "getthreadname", "createvirtualnamespace",
-             "getresources", "getlasterror",]
+             "getresources", "getlasterror", "json_parse", ]
 
 # This is the definition of the first security layer
 # Copy all of the functions named by COPIED_API
