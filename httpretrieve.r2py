@@ -16,14 +16,13 @@
 """
 
 
-
-dy_import_module_symbols('urlparse.r2py')
-dy_import_module_symbols('sockettimeout.r2py')
-dy_import_module_symbols('urllib.r2py')
-
+librepysocket = dy_import_module("librepysocket.r2py")
+urlparse = dy_import_module('urlparse.r2py')
+urllib = dy_import_module('urllib.r2py')
 
 
-class HttpConnectionError(Exception):
+
+class HttpConnectionError(RepyException):
   """
   Error indicating that the web server has unexpectedly dropped the
   connection.
@@ -32,7 +31,7 @@ class HttpConnectionError(Exception):
 
 
 
-class HttpBrokenServerError(Exception):
+class HttpBrokenServerError(RepyException):
   """
   Error indicating that the web server has sent us complete garbage instead
   of something resembling HTTP.
@@ -42,7 +41,7 @@ class HttpBrokenServerError(Exception):
 
 
 def httpretrieve_open(url, querydata=None, postdata=None,\
-    httpheaders=None, proxy=None, timeout=None):
+    httpheaders=None, proxy=None, timeout=5):
   """
   <Purpose>
      Returns a file-like object that can be used to read the content from
@@ -72,10 +71,9 @@ def httpretrieve_open(url, querydata=None, postdata=None,\
     proxy (optional):
            A proxy server 2-tuple to bind to: ('host', port).       
     timeout (optional):
-           A timeout for establishing a connection to the web server,
-           sending headers, and reading the response headers.
-
-           If excluded or None, never times out.
+           A timeout for establishing a connection to the web server.
+           Sending headers, and reading the response headers is not 
+           subject to timing out at the moment.
 
   <Exceptions>
     ValueError if given an invalid URL, or malformed limit or timeout
@@ -85,7 +83,7 @@ def httpretrieve_open(url, querydata=None, postdata=None,\
     HttpConnectionError if opening the connection fails, or if the
       connection is closed by the server before we expect.
 
-    SocketTimeoutError if the timeout is exceeded.
+    TimeoutError if the timeout is exceeded.
 
     HttpBrokenServerError if the response or the Location response header
       is malformed.
@@ -103,7 +101,7 @@ def httpretrieve_open(url, querydata=None, postdata=None,\
   starttimefloat = getruntime()
 
   # Check if the URL is valid and get host, path, port and query
-  parsedurldict = urlparse_urlsplit(url)
+  parsedurldict = urlparse.urlparse_urlsplit(url)
   hoststr = parsedurldict['hostname']
   pathstr = parsedurldict['path']
   portint = parsedurldict.get('port')
@@ -127,21 +125,16 @@ def httpretrieve_open(url, querydata=None, postdata=None,\
   try:
     if proxy is not None:
       # if there is a proxy, open a connection with the proxy instead of the actual server
-      # use the timeout we are given (or none)
-      sockobj = timeout_openconnection(proxy[0], proxy[1], timeout=timeout)  
+      sockobj = librepysocket.openconn(proxy[0], proxy[1], timeout=timeout)  
     else:
       # if there is no proxy open a connection with server directly
-      # use the timeout we are given (or none)
-      sockobj = timeout_openconnection(gethostbyname(hoststr), portint, timeout=timeout)
+      sockobj = librepysocket.openconn(gethostbyname(hoststr), portint, timeout=timeout)
 
-  except Exception, e:
+  except TimeoutError:
     # If a socket object was created, we want to clean in up.
     if sockobj:
       sockobj.close()
-
-    if repr(e).startswith("timeout("):
-      raise HttpConnectionError("Socket timed out connecting to host/port.")
-    raise
+    raise HttpConnectionError("Socket timed out connecting to host/port.")
 
   try:
     # Builds the HTTP request:
@@ -154,15 +147,6 @@ def httpretrieve_open(url, querydata=None, postdata=None,\
     # Now, we're done with the HTTP request part of the session, and we need
     # to get the HTTP response.
 
-    # Check if we've timed out (if the user requested a timeout); update the
-    # socket timeout to reflect the time taken sending the request.
-    if timeout is None:
-      sockobj.settimeout(0)
-    elif getruntime() - starttimefloat >= timeout:
-      raise SocketTimeoutError("Timed out")
-    else:
-      sockobj.settimeout(timeout - (getruntime() - starttimefloat))
-
     # Receive the header lines from the web server (a series of CRLF-terminated
     # lines, terminated by an empty line, or by the server closing the
     # connection.
@@ -172,11 +156,10 @@ def httpretrieve_open(url, querydata=None, postdata=None,\
         # This should probably be replaced with page-sized reads in the future,
         # but for now, the behavior is at least correct.
         headersstr += sockobj.recv(1)
-      except Exception, e:
-        if str(e) == "Socket closed":
-          break
-        else:
-          raise
+      except SocketWouldBlockError:
+        sleep(0.01)
+      except SocketClosedRemote:
+        break
 
     httpheaderlist = headersstr.split("\r\n")
     # Ignore (a) trailing blank line(s) (for example, the response header-
@@ -203,7 +186,7 @@ def httpretrieve_open(url, querydata=None, postdata=None,\
     friendlystatusstr = statuslinelist[2]
     try:
       statusint = int(statuslinelist[1])
-    except ValueError, e:
+    except ValueError:
       raise HttpBrokenServerError("Server returned garbage for HTTP " + \
         "response (status code isn't integer).")
 
@@ -217,7 +200,7 @@ def httpretrieve_open(url, querydata=None, postdata=None,\
       sockobj.close()
       try:
         redirecturlstr = httpheaderdict["Location"][0]
-      except (KeyError, IndexError), ke:
+      except (KeyError, IndexError):
         # When a server returns a redirect status code (3xx) but no Location
         # header, some clients, e.g. Firefox, just show the response body
         # as they would normally for a 2xx or 4xx response. So, I think we
@@ -226,7 +209,11 @@ def httpretrieve_open(url, querydata=None, postdata=None,\
         pass
       else:
         # If the server did send a redirect location, let's go there.
-        return httpretrieve_open(redirecturlstr)
+        try:
+          return httpretrieve_open(redirecturlstr)
+        except Exception, e:
+          # XXX Clean this mess up. Let's define an HttpRedirectionError or some such.
+          raise Exception("Error following redirect: " + repr(e))
 
     # If we weren't requested to redirect, and we didn't, return a read-only
     # file-like object (representing the response body) to the caller.
@@ -405,12 +392,11 @@ class _httpretrieve_filelikeobject:
     while True:
       try:
         contentchunkstr = self._sockobj.recv(lefttoread or 4096)
-      except Exception, e:
-        if str(e) == "The socket has been closed remotely!":
-          self._totalcontentisreceived = True
-          break
-        else:
-          raise
+      except SocketWouldBlockError:
+        sleep(0.01)
+      except SocketClosedRemote:
+        self._totalcontentisreceived = True
+        break
       
       httpcontentstr += contentchunkstr
       self._totalread += len(contentchunkstr)
@@ -527,12 +513,12 @@ def _httpretrieve_build_request(host, port, path, querydata, postdata, \
 
   # Type-conversions:
   if type(querydata) is dict:
-    querydata = urllib_quote_parameters(querydata)
+    querydata = urllib.urllib_quote_parameters(querydata)
   elif querydata is None:
     querydata = ""
 
   if type(postdata) is dict:
-    postdata = urllib_quote_parameters(postdata)
+    postdata = urllib.urllib_quote_parameters(postdata)
 
   # Default to GET, unless the caller specifies a message body to send.
   methodstr = "GET"
