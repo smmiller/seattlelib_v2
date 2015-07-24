@@ -61,3 +61,59 @@ def math_log(X, base=math_e, epsilon=1e-16):
     X *= X                    # We perform the squaring again
   return (integer + decimal)
 
+
+# SMM:
+# Mostly a helper for taylor approximation of cos,
+# but we might as well give it to the caller.
+#
+# Note: Results in a RuntimeError for x >= 1000
+#
+#
+def math_factorial(x):
+  if x == 0:
+    return 1
+  else:
+    return x * math_factorial(x-1)
+
+
+
+# SMM:
+# We can compute cos with a taylor series approximation.
+# At the magic number of 11 terms, we get a value very
+# close to python.
+#
+# math_cos(2.1) == -0.5048461045998466 
+# math.cos(2.1) == -0.5048461045998576
+#
+#
+TERMS = 11
+
+def math_cos(x):
+  taylorsum = 0
+  for n in range(TERMS):
+    taylorsum += (-1)**n * (x**(2*n) / math_factorial(2*n))
+  return taylorsum
+
+
+
+# SMM:
+# Don't need another taylor series when
+# we have the trig identity for sin & cos.
+#
+#
+def math_sin(x):
+  return (1 - math_cos(x)**2)**0.5
+
+
+
+# SMM:
+# We (or the caller) could do math_sin(x) / math_cos(x),
+# but that would be computationally inefficient. Better
+# to calculate math_cos(x) once.
+#
+#
+def math_tan(x):
+  cosx = math_cos(x)
+  return (1 - cosx**2)**0.5 / cosx
+
+
